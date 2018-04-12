@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"math"
+	"reflect"
 
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
@@ -29,22 +31,53 @@ func run() {
 	points := definePoints(CAN_WIDTH, CAN_HEIGHT, X_PIXELS, Y_PIXELS)
 
 	frames := 0
+	steps := 6
+	size := 20.0
 
 	for !win.Closed() {
 		win.Clear(colornames.Black)
 		frames++
 		for _, v := range points {
-			a := ledpixel(v, colorShader(v, frames, 0.2), 20)
-			a.Draw(win)
 
-			b := ledpixel(v, colorShader(v, frames, 0.4), 14)
-			b.Draw(win)
-
-			c := ledpixel(v, colorShader(v, frames, 1), 5)
-			c.Draw(win)
-
+			for i := 1; i <= steps; i++ {
+				shader := colorShader(v, frames, 1-smoothing(i, steps))
+				circle := ledpixel(v, shader, size*smoothing(i, steps))
+				circle.Draw(win)
+			}
 		}
 		win.Update()
+	}
+}
+
+func smoothing(i, limit int) float64 {
+	x := (float64(i) / float64(limit)) + 0.01 //0.0 -> 1.0
+	return 1 - math.Pow(x, 2)
+}
+
+type bulb []*imdraw.IMDraw
+
+func toBulb(p pixel.Vec, size float64, time int) bulb {
+
+	//given an iterator and a limit, return on 1-x^2
+	smoothing := func(i, limit int) float64 {
+		x := float64(i) / float64(limit) //0.0 -> 1.0
+		return 1 - math.Pow(x, 2)
+	}
+
+	steps := 4
+	bulbs := make([]*imdraw.IMDraw, steps+1)
+	for i := 1; i <= steps; i++ {
+		shader := colorShader(p, time, 1-smoothing(i, steps))
+		circle := ledpixel(p, shader, size*smoothing(i, steps))
+		bulbs[i] = circle
+	}
+	return bulbs
+}
+
+func (b bulb) Draw(t pixel.Target) {
+	for _, v := range b {
+		fmt.Println(reflect.TypeOf(v))
+		// v.Draw(t)
 	}
 }
 
@@ -64,6 +97,8 @@ func definePoints(canvasWidth, canvasHeight float64, columns, rows int) []pixel.
 
 	return points
 }
+
+type shaderFunc func(pos pixel.Vec, frame int, a float64) color.Color
 
 func colorShader(pos pixel.Vec, frame int, a float64) color.Color {
 	r := pos.X / CAN_WIDTH * a
