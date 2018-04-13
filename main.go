@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"log"
 	"math"
-	"reflect"
+	"time"
 
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
@@ -21,63 +22,74 @@ func run() {
 	cfg := pixelgl.WindowConfig{
 		Title:  "Pixel Rocks!",
 		Bounds: pixel.R(0, 0, CAN_WIDTH, CAN_HEIGHT),
-		VSync:  true,
 	}
 	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
 		panic(err)
 	}
 
-	points := definePoints(CAN_WIDTH, CAN_HEIGHT, X_PIXELS, Y_PIXELS)
+	win.SetSmooth(true)
 
-	frames := 0
-	steps := 6
-	size := 20.0
+	points := definePoints(CAN_WIDTH, CAN_HEIGHT, X_PIXELS, Y_PIXELS)
+	var frames = 0
+	var frameCount = 0
+	var second = time.Tick(time.Second)
+	shaders := []shaderFunc{xGradientShader, colorShader}
+	activeShaderIndex := 0
 
 	for !win.Closed() {
-		win.Clear(colornames.Black)
 		frames++
-		for _, v := range points {
+		frameCount++
 
-			for i := 1; i <= steps; i++ {
-				shader := colorShader(v, frames, 1-smoothing(i, steps))
-				circle := ledpixel(v, shader, size*smoothing(i, steps))
-				circle.Draw(win)
+		if win.JustPressed(pixelgl.MouseButtonLeft) {
+			log.Println("pressed")
+			activeShaderIndex++
+			if activeShaderIndex == len(shaders) {
+				activeShaderIndex = 0
 			}
 		}
+
+		win.Clear(colornames.Black)
+		for _, v := range points {
+			b := toBulb(v, 20.0, frames, shaders[activeShaderIndex])
+
+			b.Draw(win)
+		}
 		win.Update()
+		select {
+		case <-second:
+			win.SetTitle(fmt.Sprintf("%s | FPS: %d", cfg.Title, frameCount))
+			frameCount = 0
+		default:
+		}
 	}
 }
 
 func smoothing(i, limit int) float64 {
-	x := (float64(i) / float64(limit)) + 0.01 //0.0 -> 1.0
+	x := (float64(i) / float64(limit))
 	return 1 - math.Pow(x, 2)
 }
 
+type shaderFunc func(pos pixel.Vec, frame int, a float64) color.Color
 type bulb []*imdraw.IMDraw
 
-func toBulb(p pixel.Vec, size float64, time int) bulb {
+func toBulb(p pixel.Vec, size float64, time int, shaderFn shaderFunc) bulb {
 
-	//given an iterator and a limit, return on 1-x^2
-	smoothing := func(i, limit int) float64 {
-		x := float64(i) / float64(limit) //0.0 -> 1.0
-		return 1 - math.Pow(x, 2)
-	}
-
-	steps := 4
-	bulbs := make([]*imdraw.IMDraw, steps+1)
+	steps := 6
+	bulbs := make([]*imdraw.IMDraw, steps)
 	for i := 1; i <= steps; i++ {
-		shader := colorShader(p, time, 1-smoothing(i, steps))
+		shader := shaderFn(p, time, 1-smoothing(i, steps))
 		circle := ledpixel(p, shader, size*smoothing(i, steps))
-		bulbs[i] = circle
+		bulbs[i-1] = circle
 	}
 	return bulbs
 }
 
 func (b bulb) Draw(t pixel.Target) {
 	for _, v := range b {
-		fmt.Println(reflect.TypeOf(v))
-		// v.Draw(t)
+		if v != nil {
+			v.Draw(t)
+		}
 	}
 }
 
@@ -98,13 +110,20 @@ func definePoints(canvasWidth, canvasHeight float64, columns, rows int) []pixel.
 	return points
 }
 
-type shaderFunc func(pos pixel.Vec, frame int, a float64) color.Color
+func xGradientShader(pos pixel.Vec, frame int, a float64) color.Color {
+	rate := frame * 3
+	r := pos.X / CAN_WIDTH
+	g := ((math.Sin(float64(rate)/120) / 2) + 0.5)
+	b := ((math.Cos(float64(rate)/90) / 2) + 0.5)
+	return pixel.RGB(r, g, b).Mul(pixel.Alpha(a))
+}
 
 func colorShader(pos pixel.Vec, frame int, a float64) color.Color {
-	r := pos.X / CAN_WIDTH * a
-	g := ((math.Sin(float64(frame)/120) / 2) + 0.5) * a
-	b := ((math.Cos(float64(frame)/90) / 2) + 0.5) * a
-	return pixel.RGB(r, g, b)
+	var r, g, b float64
+	r = 1.0
+	g = 0.5
+	b = 0.1
+	return pixel.RGB(r, g, b).Mul(pixel.Alpha(a))
 }
 
 func ledpixel(pos pixel.Vec, col color.Color, r float64) *imdraw.IMDraw {
